@@ -8,6 +8,7 @@ from typing import List, Dict, Any
 import logging
 from datetime import datetime, timedelta
 import os
+import io
 
 class SocialMediaAnalytics:
     def __init__(self, mongo_uri: str, database: str, collection: str):
@@ -51,7 +52,6 @@ class SocialMediaAnalytics:
             client.admin.command('ismaster')
             
             db = client[database]
-            st.write("MongoDB connection established successfully")
             return db
         
         except pymongo.errors.ConnectionFailure as e:
@@ -130,7 +130,6 @@ class SocialMediaAnalytics:
             ]
             
             results = list(collection.aggregate(pipeline))
-            st.write(f"Successfully fetched {len(results)} channel data records")
             return results
     
         except Exception as e:
@@ -217,9 +216,9 @@ class SocialMediaAnalytics:
             
             # Add State Meaning
             state_meanings = {
-                0: 'Initial/Pending',
+                0: 'Failed',
                 1: 'Successful',
-                2: 'Processing',
+                2: 'Failed',
                 3: 'Failed',
             }
             df['StateMeaning'] = df['State'].map(state_meanings)
@@ -327,6 +326,92 @@ class SocialMediaAnalytics:
         )
         
         return fig
+    def fetch_top_customers(self) -> pd.DataFrame:
+        """
+        Fetch top 10 customers who have posted the most along with their favorite channel.
+
+        Returns:
+            pd.DataFrame: DataFrame containing top customers and their favorite channels.
+        """
+        # Establish MongoDB connection
+        db = self.get_mongo_connection()
+        if db is None:
+            st.error("Database connection failed.")
+            return pd.DataFrame()
+
+        try:
+            collection = db[self.collection]
+
+            # Aggregation pipeline to find top customers
+            pipeline = [
+                # Step 1: Group by `nowfloats_id` and `channel` to count posts per channel
+                {
+                    '$group': {
+                        '_id': {
+                            'nowfloats_id': '$nowfloats_id',
+                            'channel': '$channel'
+                        },
+                        'postCount': {'$sum': 1}
+                    }
+                },
+                # Step 2: Group by `nowfloats_id` to find the total posts and all channel data
+                {
+                    '$group': {
+                        '_id': '$_id.nowfloats_id',
+                        'totalPosts': {'$sum': '$postCount'},
+                        'channels': {
+                            '$push': {
+                                'channel': '$_id.channel',
+                                'postCount': '$postCount'
+                            }
+                        }
+                    }
+                },
+                # Step 3: Sort channels by post count in descending order
+                {
+                    '$addFields': {
+                        'favoriteChannel': {
+                            '$arrayElemAt': [
+                                {
+                                    '$sortArray': {
+                                        'input': '$channels',
+                                        'sortBy': {'postCount': -1}
+                                    }
+                                },
+                                0
+                            ]
+                        }
+                    }
+                },
+                # Step 4: Sort customers by total posts in descending order
+                {
+                    '$sort': {'totalPosts': -1}
+                },
+                # Step 5: Limit to the top 10 customers
+                {
+                    '$limit': 10
+                }
+            ]
+
+            # Execute aggregation pipeline
+            results = list(collection.aggregate(pipeline))
+
+            # Transform the results into a pandas DataFrame
+            data = [
+                {
+                    'nowfloats_id': item['_id'],
+                    'TotalPosts': item['totalPosts'],
+                    'FavoriteChannel': item['favoriteChannel']['channel'],
+                    'ChannelPostCount': item['favoriteChannel']['postCount']
+                }
+                for item in results
+            ]
+
+            return pd.DataFrame(data)
+
+        except Exception as e:
+            st.error(f"Error fetching top customers: {e}")
+            return pd.DataFrame()
 
 def main():
     # Set page configuration
@@ -348,114 +433,125 @@ def main():
         collection=collection
     )
     
+    # Fetch initial data (ensure df is defined)
+    raw_data = analytics.fetch_social_media_data()
+    if not raw_data:  # Check if data fetching failed
+        st.error("No data available. Please check the database connection or data source.")
+        return
+
+    df = analytics.transform_data(raw_data)
+    if df.empty:  # Check if the transformation resulted in an empty DataFrame
+        st.error("Data transformation failed. Please check the raw data.")
+        return
+
+    if df.empty:
+        st.error("No data available. Please check the database connection or data source.")
+        return  # Exit the function if no data is available
+
     # Title and Description
     st.title("🌐 Advanced Social Media Channel State Analytics")
-    st.markdown("Comprehensive insights into social media channel performance and engagement.")
     
-    # Fetch and Transform Data
-    raw_data = analytics.fetch_social_media_data()
-    
-    # Check if data is available
-    if not raw_data:
-        st.error("No data available. Please check your database connection.")
-        return
-    
-    # Transform data
-    df = analytics.transform_data(raw_data)
-    # Date-wise Insights Section
-    st.markdown("### 🕒 Date-wise Insights")
-    
-    # Date range selection
-    min_date = df['CreatedDate'].min().date()
-    max_date = df['CreatedDate'].max().date()
-    
-    # Allow date range selection
-    date_range = st.date_input(
+
+
+
+    # Add sidebar with interactive options
+    st.sidebar.header("🔧 Filters and Options")
+    selected_channel = st.sidebar.selectbox("Select Channel", ["All"] + list(df["Channel"].unique()))
+    selected_operation = st.sidebar.selectbox("Select Operation", ["All"] + list(df["Operation"].unique()))
+    selected_state = st.sidebar.selectbox("Select State", ["All"] + list(df["StateMeaning"].unique()))
+    st.sidebar.markdown("---")
+    filtered_df = df.copy()  # Create a copy to avoid modifying the original data
+
+    if selected_channel != "All":
+        filtered_df = filtered_df[filtered_df["Channel"] == selected_channel]
+    if selected_operation != "All":
+        filtered_df = filtered_df[filtered_df["Operation"] == selected_operation]
+    if selected_state != "All":
+        filtered_df = filtered_df[filtered_df["StateMeaning"] == selected_state]
+    min_date = filtered_df["CreatedDate"].min().date()
+    max_date = filtered_df["CreatedDate"].max().date()
+    selected_date_range = st.sidebar.date_input(
         "Select Date Range",
         value=(min_date, max_date),
         min_value=min_date,
-        max_value=max_date
+        max_value=max_date)
+
+    # Filter data based on the selected date range
+    if isinstance(selected_date_range, tuple) and len(selected_date_range) == 2:
+        start_date, end_date = selected_date_range
+        filtered_df = filtered_df[
+            (filtered_df["CreatedDate"] >= pd.Timestamp(start_date)) &
+            (filtered_df["CreatedDate"] <= pd.Timestamp(end_date))
+        ]
+    df = filtered_df.copy()  # Update the main dataframe with filtered data
+    # Real-time Metrics
+    st.markdown("### 📊 Real-time Metrics")
+    st.markdown(
+        """
+        <div style="display: flex; justify-content: space-around; margin-top: 1rem;">
+            <div style="text-align: center;">
+                <h3 style="font-size: 2rem;">{:,}</h3>
+                <p style="font-size: 1rem;">Total Entries</p>
+            </div>
+            <div style="text-align: center;">
+                <h3 style="font-size: 2rem;">{:,}</h3>
+                <p style="font-size: 1rem;">Unique Channels</p>
+            </div>
+            <div style="text-align: center;">
+                <h3 style="font-size: 2rem;">{:.2f}%</h3>
+                <p style="font-size: 1rem;">Success Rate</p>
+            </div>
+        </div>
+        """.format(
+            df["Count"].sum(),
+            df["Channel"].nunique(),
+            (df[df["StateMeaning"] == "Successful"]["Count"].sum() / df["Count"].sum() * 100) if not df.empty else 0
+        ),
+        unsafe_allow_html=True
     )
     
-    # Filter data based on selected date range
-    filtered_df = df[
-        (df['CreatedDate'].dt.date >= date_range[0]) & 
-        (df['CreatedDate'].dt.date <= date_range[1])
-    ]
-    
-    # Compute date-wise metrics
-    total_entries = filtered_df['Count'].sum()
-    successful_entries = filtered_df[filtered_df['StateMeaning'] == 'Successful']['Count'].sum()
-    success_rate = (successful_entries / total_entries) * 100 if total_entries > 0 else 0
-    
-    col1, col2, col3 = st.columns(3)
-    
-    with col1:
-        st.metric("Total Entries", f"{total_entries:,}")
-    
-    with col2:
-        st.metric("Successful Entries", f"{successful_entries:,}")
-    
-    with col3:
-        st.metric("Success Rate", f"{success_rate:.2f}%")
-    
-    # Daily breakdown
-    st.subheader("📆 Daily Breakdown")
-    daily_breakdown = filtered_df.groupby(
-        [filtered_df['CreatedDate'].dt.date, 'StateMeaning']
-    )['Count'].sum().unstack(fill_value=0)
-    
-    st.dataframe(daily_breakdown, use_container_width=True)
-    # Create Rows of Visualizations
-    row1_col1, row1_col2 = st.columns(2)
-    
-    with row1_col1:
-        st.plotly_chart(
-            analytics.create_channel_state_chart(df), 
-            use_container_width=True
-        )
-    
-    with row1_col2:
-        st.plotly_chart(
-            analytics.create_pie_chart(df), 
-            use_container_width=True
-        )
-    
-    # Second Row
-    row2_col1, row2_col2 = st.columns(2)
-    
-    with row2_col1:
-        st.plotly_chart(
-            analytics.create_boost_priority_chart(df), 
-            use_container_width=True
-        )
-    
-    with row2_col2:
-        st.plotly_chart(
-            analytics.create_operation_distribution_chart(df), 
-            use_container_width=True
-        )
-    
-    # Date-wise Insights Row
-    row3_col1, row3_col2 = st.columns(2)
-    
-    with row3_col1:
-        st.plotly_chart(
-            analytics.create_daily_trend_chart(df), 
-            use_container_width=True
-        )
-    
-    with row3_col2:
-        st.plotly_chart(
-            analytics.create_channel_daily_performance(df), 
-            use_container_width=True
-        )
-    
-    # Detailed Data Table
-    st.subheader("📊 Detailed Social Media Channel Data")
-    st.dataframe(df, use_container_width=True)
+    # Help Button
+    if st.sidebar.button("❓ Help/Guide"):
+        st.sidebar.info("""
+        - Use filters to customize the data view.
+        - Hover over charts for detailed insights.
+        - Download data using the export options below.
+        """)
 
-    
+    # Data Table and Export Options
+    st.markdown("### 📊 Detailed Social Media Channel Data")
+    st.dataframe(filtered_df, use_container_width=True)
+
+    st.download_button(
+        label="Download Data as CSV",
+        data=filtered_df.to_csv(index=False),
+        file_name="social_media_analytics.csv",
+        mime="text/csv"
+    )
+
+    # Visualization Options
+    st.markdown("### 📈 Visualizations")
+    chart_type = st.selectbox("Choose Chart Type", ["Bar Chart", "Pie Chart", "Line Chart", "Heatmap"])
+
+    if chart_type == "Bar Chart":
+        st.plotly_chart(analytics.create_channel_state_chart(filtered_df), use_container_width=True)
+    elif chart_type == "Pie Chart":
+        st.plotly_chart(analytics.create_pie_chart(filtered_df), use_container_width=True)
+    elif chart_type == "Line Chart":
+        st.plotly_chart(analytics.create_daily_trend_chart(filtered_df), use_container_width=True)
+    elif chart_type == "Heatmap":
+        st.plotly_chart(analytics.create_channel_daily_performance(filtered_df), use_container_width=True)
+
+    # Top Customers Section
+    st.markdown("### 🏆 Top Customers")
+    top_customers_df = analytics.fetch_top_customers()
+
+    if not top_customers_df.empty:
+        st.dataframe(top_customers_df)
+        st.bar_chart(data=top_customers_df, x="nowfloats_id", y="TotalPosts", use_container_width=True)
+    else:
+        st.warning("No data available for top customers.")
+
 
 if __name__ == "__main__":
     main()
