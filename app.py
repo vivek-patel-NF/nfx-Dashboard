@@ -23,7 +23,167 @@ class SocialMediaAnalytics:
         self.mongo_uri = mongo_uri
         self.database = database
         self.collection = collection
-    
+    def create_state_color_map(self):
+            """
+            Create a color mapping for different states
+            
+            Returns:
+                dict: Color mapping for states
+            """
+            return {
+                0: 'red',    # Failed
+                1: 'green',  # Successful
+                2: 'red',    # Failed
+                3: 'red'     # Failed
+            }
+
+    def render_social_media_card(self, record):
+        """
+        Render a card for a social media record
+        
+        Args:
+            record (dict): Social media record
+        
+        Returns:
+            str: HTML for the card
+        """
+        # Determine state color
+        state_colors = self.create_state_color_map()
+        state_color = state_colors.get(record.get('state', 0), 'gray')
+        
+        # Extract relevant information with proper fallbacks
+        object_id = str(record.get('_id', 'N/A'))
+        channel = record.get('channel', 'N/A')
+        state = record.get('state', 'N/A')
+        operation = record.get('operation', 'N/A')
+        
+        # Social data extraction
+        social_data = record.get('social_data', {})
+        message = social_data.get('message', 'No message')
+        picture = social_data.get('picture', '')
+        link = social_data.get('link', '')
+        
+        # Truncate message if too long
+        truncated_message = message[:200] + '...' if len(message) > 200 else message
+        
+        # Create card HTML
+        # Create card HTML
+        card_html = f'''
+        <div style="border: 2px solid {state_color}; border-radius: 10px; padding: 15px; margin-bottom: 15px; background-color: white; box-shadow: 0 4px 6px rgba(0,0,0,0.1);">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
+                <h3 style="margin: 0; color: {state_color};">Record ID: {object_id}</h3>
+                <span style="background-color: {state_color}; color: white; padding: 5px 10px; border-radius: 5px;">
+                    {channel.upper()} | {operation.upper()}
+                </span>
+            </div>
+        '''
+        
+        # Example usage of truncated message
+        truncated_message = message[:250] + ('...' if len(message) > 250 else '')
+
+        return card_html
+
+    def render_paginated_cards(self, page=1, records_per_page=5):
+        """
+        Render paginated cards for both successful and failed states.
+        
+        Args:
+            page (int): Current page number.
+            records_per_page (int): Number of records to display per type.
+        
+        Returns:
+            dict: A dictionary with cards and metadata for pagination.
+        """
+        db = self.get_mongo_connection()
+        if db is None:
+            st.error("Database connection failed")
+            return {"cards": [], "total_records": 0}
+        
+        try:
+            collection = db[self.collection]
+            
+            # Query for successful and failed records
+            successful_query = {'state': 1}
+            failed_query = {'state': {'$in': [0, 2, 3]}}
+            
+            # Sort and pagination
+            sort = [('created_at', -1)]
+            skip = (page - 1) * records_per_page
+            limit = records_per_page
+            
+            # Fetch records
+            successful_records = list(collection.find(successful_query).sort(sort).skip(skip).limit(limit))
+            failed_records = list(collection.find(failed_query).sort(sort).skip(skip).limit(limit))
+            
+            # Combine records
+            records = successful_records + failed_records
+            total_records = collection.count_documents(successful_query) + collection.count_documents(failed_query)
+            
+            # Render cards
+            cards = [self.render_social_media_card(record) for record in records]
+            
+            return {"cards": cards, "total_records": total_records}
+        
+        except Exception as e:
+            st.error(f"Error rendering paginated cards: {e}")
+            return {"cards": [], "total_records": 0}
+
+
+    def render_records_as_cards(self, df, page=1, records_per_page=5):
+        """
+        Render social media records as cards with pagination.
+        
+        Args:
+            df (pd.DataFrame): DataFrame containing filters.
+            page (int): Current page number.
+            records_per_page (int): Number of records to display per page.
+        
+        Returns:
+            dict: A dictionary with cards and metadata for pagination.
+        """
+        # Fetch MongoDB connection
+        db = self.get_mongo_connection()
+        if db is None:
+            st.error("Database connection failed")
+            return {"cards": [], "total_records": 0}
+        
+        try:
+            collection = db[self.collection]
+            
+            # Build query for successful and failed states
+            query = {}
+            if not df.empty:
+                # If specific channels are selected
+                if 'Channel' in df.columns and len(df['Channel'].unique()) > 0:
+                    query['channel'] = {'$in': df['Channel'].unique().tolist()}
+                
+                # If specific states are selected
+                if 'StateMeaning' in df.columns:
+                    state_map = {'Successful': 1, 'Failed': [0, 2, 3]}
+                    query['state'] = {'$in': state_map['Successful'] if 'Successful' in df['StateMeaning'].unique() 
+                                    else state_map['Failed']}
+            
+            # Sort by `created_at` descending
+            sort = [('created_at', -1)]
+            
+            # Calculate pagination details
+            skip = (page - 1) * records_per_page
+            limit = records_per_page
+            
+            # Fetch records with the query
+            records = list(collection.find(query).sort(sort).skip(skip).limit(limit))
+            total_records = collection.count_documents(query)
+            
+            # Render cards
+            cards = [self.render_social_media_card(record) for record in records]
+            
+            return {"cards": cards, "total_records": total_records}
+        
+        except Exception as e:
+            st.error(f"Error rendering records as cards: {e}")
+            return {"cards": [], "total_records": 0}
+
+
     def get_mongo_connection(self, _mongo_uri=None, _database=None):
         """
         Establish a secure MongoDB connection with robust error handling
@@ -155,7 +315,9 @@ class SocialMediaAnalytics:
                 color_discrete_map={
                     'Initial/Pending': 'lightblue', 
                     'Processing': 'orange', 
-                    'Completed': 'green'
+                    'Failed': 'red',
+                    'Completed': 'green',
+                    'Successful': 'green',
                 }
             )
             
@@ -541,8 +703,59 @@ def main():
         st.plotly_chart(analytics.create_daily_trend_chart(filtered_df), use_container_width=True)
     elif chart_type == "Heatmap":
         st.plotly_chart(analytics.create_channel_daily_performance(filtered_df), use_container_width=True)
+    st.markdown("### 📈 Visualizations & Records")
+    view_type = st.selectbox("Choose View Type", ["Charts", "Record Cards", "Both"])
 
-    # Top Customers Section
+    if view_type in ["Charts", "Both"]:
+        st.markdown("#### 📊 Charts")
+
+        if chart_type == "Bar Chart":
+            st.plotly_chart(analytics.create_channel_state_chart(filtered_df), use_container_width=True)
+        elif chart_type == "Pie Chart":
+            st.plotly_chart(analytics.create_pie_chart(filtered_df), use_container_width=True)
+        elif chart_type == "Line Chart":
+            st.plotly_chart(analytics.create_daily_trend_chart(filtered_df), use_container_width=True)
+        elif chart_type == "Heatmap":
+            st.plotly_chart(analytics.create_channel_daily_performance(filtered_df), use_container_width=True)
+    
+    if view_type in ["Record Cards", "Both"]:
+        st.markdown("#### 🗂️ Record Cards") # Error rendering records as cards: in needs an array, full error: {'ok': 0.0, 'errmsg': 'in needs an array', 'code': 2, 'codeName': 'BadValue', '$clusterTime': {'clusterTime': Timestamp(1733799069, 1), 'signature': {'hash': b'\x91\x8e\xca\x8d\x82\x8b\xaf\xec\x17I\x1fV\xaa\xed1W\xdc\x02\xcf\xfa', 'keyId': 7407672065555169293}}, 'operationTime': Timestamp(1733799069, 1)} No records found matching the current filters.
+        
+    #     # Render cards
+    #     cards = analytics.render_records_as_cards(filtered_df)
+        
+    #     if cards:
+    #         # Use st.markdown to render HTML cards
+    #         for card in cards:
+    #             st.markdown(card, unsafe_allow_html=True)
+    #     else:
+    #         st.warning("No records found matching the current filters.")
+    # # Top Customers Section
+
+        # Pagination settings
+    page = st.session_state.get('page', 1)
+    records_per_page = 5
+
+    # Fetch cards and total records
+    result = analytics.render_paginated_cards(page=page, records_per_page=records_per_page)
+
+    # Display cards
+    if result["cards"]:
+        for card in result["cards"]:
+            st.markdown(card, unsafe_allow_html=True)
+
+    # Handle pagination buttons
+    col1, col2 = st.columns(2)
+    with col1:
+        if page > 1 and st.button("Previous Page"):
+            st.session_state['page'] = page - 1
+            st.experimental_rerun()
+
+    with col2:
+        if page * records_per_page < result["total_records"] and st.button("Next Page"):
+            st.session_state['page'] = page + 1
+            st.experimental_rerun()
+
     st.markdown("### 🏆 Top Customers")
     top_customers_df = analytics.fetch_top_customers()
 
