@@ -693,7 +693,6 @@ def main():
 
     # Visualization Options
     st.markdown("### 📈 Visualizations")
-    chart_type = st.selectbox("Choose Chart Type", ["Bar Chart", "Pie Chart", "Line Chart", "Heatmap"])
     st.plotly_chart(analytics.create_channel_state_chart(filtered_df), use_container_width=True)
     st.plotly_chart(analytics.create_pie_chart(filtered_df), use_container_width=True)
     st.plotly_chart(analytics.create_daily_trend_chart(filtered_df), use_container_width=True)
