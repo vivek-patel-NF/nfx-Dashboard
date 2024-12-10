@@ -72,7 +72,7 @@ class SocialMediaAnalytics:
         <div style="border: 2px solid {state_color}; border-radius: 10px; padding: 15px; margin-bottom: 15px; background-color: white; box-shadow: 0 4px 6px rgba(0,0,0,0.1);">
             <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
                 <h3 style="margin: 0; color: {state_color};">Record ID: {object_id}</h3>
-                <span style="background-color: {state_color}; color: white; padding: 5px 10px; border-radius: 5px;">
+                <a href="{link}" target="_blank" style="color: blue;"><span style="background-color: {state_color}; color: white; padding: 5px 10px; border-radius: 5px;">
                     {channel.upper()} | {operation.upper()}
                 </span>
             </div>
@@ -694,32 +694,13 @@ def main():
     # Visualization Options
     st.markdown("### 📈 Visualizations")
     chart_type = st.selectbox("Choose Chart Type", ["Bar Chart", "Pie Chart", "Line Chart", "Heatmap"])
-
-    if chart_type == "Bar Chart":
-        st.plotly_chart(analytics.create_channel_state_chart(filtered_df), use_container_width=True)
-    elif chart_type == "Pie Chart":
-        st.plotly_chart(analytics.create_pie_chart(filtered_df), use_container_width=True)
-    elif chart_type == "Line Chart":
-        st.plotly_chart(analytics.create_daily_trend_chart(filtered_df), use_container_width=True)
-    elif chart_type == "Heatmap":
-        st.plotly_chart(analytics.create_channel_daily_performance(filtered_df), use_container_width=True)
+    st.plotly_chart(analytics.create_channel_state_chart(filtered_df), use_container_width=True)
+    st.plotly_chart(analytics.create_pie_chart(filtered_df), use_container_width=True)
+    st.plotly_chart(analytics.create_daily_trend_chart(filtered_df), use_container_width=True)
+    st.plotly_chart(analytics.create_channel_daily_performance(filtered_df), use_container_width=True)
     st.markdown("### 📈 Visualizations & Records")
-    view_type = st.selectbox("Choose View Type", ["Charts", "Record Cards", "Both"])
 
-    if view_type in ["Charts", "Both"]:
-        st.markdown("#### 📊 Charts")
-
-        if chart_type == "Bar Chart":
-            st.plotly_chart(analytics.create_channel_state_chart(filtered_df), use_container_width=True)
-        elif chart_type == "Pie Chart":
-            st.plotly_chart(analytics.create_pie_chart(filtered_df), use_container_width=True)
-        elif chart_type == "Line Chart":
-            st.plotly_chart(analytics.create_daily_trend_chart(filtered_df), use_container_width=True)
-        elif chart_type == "Heatmap":
-            st.plotly_chart(analytics.create_channel_daily_performance(filtered_df), use_container_width=True)
-    
-    if view_type in ["Record Cards", "Both"]:
-        st.markdown("#### 🗂️ Record Cards") # Error rendering records as cards: in needs an array, full error: {'ok': 0.0, 'errmsg': 'in needs an array', 'code': 2, 'codeName': 'BadValue', '$clusterTime': {'clusterTime': Timestamp(1733799069, 1), 'signature': {'hash': b'\x91\x8e\xca\x8d\x82\x8b\xaf\xec\x17I\x1fV\xaa\xed1W\xdc\x02\xcf\xfa', 'keyId': 7407672065555169293}}, 'operationTime': Timestamp(1733799069, 1)} No records found matching the current filters.
+    st.markdown("#### 🗂️ Record Cards") # Error rendering records as cards: in needs an array, full error: {'ok': 0.0, 'errmsg': 'in needs an array', 'code': 2, 'codeName': 'BadValue', '$clusterTime': {'clusterTime': Timestamp(1733799069, 1), 'signature': {'hash': b'\x91\x8e\xca\x8d\x82\x8b\xaf\xec\x17I\x1fV\xaa\xed1W\xdc\x02\xcf\xfa', 'keyId': 7407672065555169293}}, 'operationTime': Timestamp(1733799069, 1)} No records found matching the current filters.
         
     #     # Render cards
     #     cards = analytics.render_records_as_cards(filtered_df)
