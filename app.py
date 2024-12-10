@@ -72,7 +72,7 @@ class SocialMediaAnalytics:
         <div style="border: 2px solid {state_color}; border-radius: 10px; padding: 15px; margin-bottom: 15px; background-color: white; box-shadow: 0 4px 6px rgba(0,0,0,0.1);">
             <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
                 <h3 style="margin: 0; color: {state_color};">Record ID: {object_id}</h3>
-                <span style="background-color: {state_color}; color: white; padding: 5px 10px; border-radius: 5px;">
+                <a href="{link}" target="_blank" style="color: blue;"><span style="background-color: {state_color}; color: white; padding: 5px 10px; border-radius: 5px;">
                     {channel.upper()} | {operation.upper()}
                 </span>
             </div>
